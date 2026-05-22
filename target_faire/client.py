@@ -19,20 +19,18 @@ class FaireSink(HotglueSink):
     def http_headers(self) -> dict:
         return {"X-FAIRE-ACCESS-TOKEN": self.config.get("api_token", "")}
 
+    def _extract_error_message(self, response: requests.Response) -> str:
+        try:
+            return response.json().get("message", response.text)
+        except Exception:
+            return response.text
+
     def validate_response(self, response: requests.Response) -> None:
         if response.status_code == 401:
             raise InvalidCredentialsError("Invalid API token (X-FAIRE-ACCESS-TOKEN)")
         elif response.status_code == 400:
-            try:
-                msg = response.json().get("message", response.text)
-            except Exception:
-                msg = response.text
-            raise InvalidPayloadError(msg)
+            raise InvalidPayloadError(self._extract_error_message(response))
         elif response.status_code == 429 or 500 <= response.status_code < 600:
             raise RetriableAPIError(self.response_error_message(response), response)
         elif 400 <= response.status_code < 500:
-            try:
-                msg = response.json().get("message", response.text)
-            except Exception:
-                msg = response.text
-            raise FatalAPIError(msg)
+            raise FatalAPIError(self._extract_error_message(response))

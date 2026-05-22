@@ -26,7 +26,7 @@ class FulfillmentsSink(FaireSink):
         if record.get("shipping_cost_cents") is not None:
             cost_minor = int(record["shipping_cost_cents"])
         elif record.get("total_shipping") is not None:
-            cost_minor = int(float(record["total_shipping"]) * 100)
+            cost_minor = round(float(record["total_shipping"]) * 100)
         else:
             cost_minor = 0
 
