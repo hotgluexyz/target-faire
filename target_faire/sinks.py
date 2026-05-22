@@ -1,5 +1,7 @@
 """Faire target sink classes."""
 
+from hotglue_etl_exceptions import InvalidPayloadError
+
 from target_faire.client import FaireSink
 
 
@@ -7,8 +9,8 @@ class FulfillmentsSink(FaireSink):
     """Sends order fulfillment/shipment data back to Faire.
 
     Accepts records following the unified SalesOrder shape. The `order_id`
-    field is required; `tracking_number`, `carrier`, and `shipping_cost_cents`
-    are the core shipment fields.
+    and `tracking_number` fields are required; `carrier` and `shipping_cost_cents`
+    are optional.
 
     Faire API: POST /external-api/v2/orders/{order_id}/shipments
     """
@@ -18,9 +20,11 @@ class FulfillmentsSink(FaireSink):
     def preprocess_record(self, record: dict, context: dict) -> dict:
         order_id = record.get("order_id") or record.get("id")
         if not order_id:
-            raise ValueError("Record is missing required field: order_id")
+            raise InvalidPayloadError("Record is missing required field: order_id")
 
         tracking_code = record.get("tracking_number") or record.get("tracking_code")
+        if not tracking_code:
+            raise InvalidPayloadError("Record is missing required field: tracking_number")
         carrier = record.get("carrier")
 
         if record.get("shipping_cost_cents") not in (None, ""):
@@ -59,6 +63,7 @@ class FulfillmentsSink(FaireSink):
             shipments = response.json().get("shipments", [])
         except Exception:
             shipments = []
-        shipment_id = shipments[-1].get("id") if shipments else None
+        last = shipments[-1] if shipments else None
+        shipment_id = last.get("id") if isinstance(last, dict) else None
         self.logger.info(f"Shipped order {order_id}, shipment_id={shipment_id}")
         return shipment_id, True, state_updates
