@@ -23,9 +23,9 @@ class FulfillmentsSink(FaireSink):
         tracking_code = record.get("tracking_number") or record.get("tracking_code")
         carrier = record.get("carrier")
 
-        if record.get("shipping_cost_cents") is not None:
+        if record.get("shipping_cost_cents") not in (None, ""):
             cost_minor = int(record["shipping_cost_cents"])
-        elif record.get("total_shipping") is not None:
+        elif record.get("total_shipping") not in (None, ""):
             cost_minor = round(float(record["total_shipping"]) * 100)
         else:
             cost_minor = 0
@@ -55,7 +55,10 @@ class FulfillmentsSink(FaireSink):
             request_data={"shipments": [record["shipment"]]},
         )
 
-        shipments = response.json().get("shipments", [])
+        try:
+            shipments = response.json().get("shipments", [])
+        except Exception:
+            shipments = []
         shipment_id = shipments[-1].get("id") if shipments else None
         self.logger.info(f"Shipped order {order_id}, shipment_id={shipment_id}")
         return shipment_id, True, state_updates
