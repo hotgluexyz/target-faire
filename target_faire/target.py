@@ -16,7 +16,7 @@ class TargetFaire(TargetHotglue):
     alerting_level = AlertingLevel.ERROR
 
     config_jsonschema = th.PropertiesList(
-        th.Property("api_token", th.StringType, required=True),
+        th.Property("api_key", th.StringType, required=True),
         th.Property(
             "api_url",
             th.StringType,

@@ -22,21 +22,21 @@ pip install git+https://github.com/hotgluexyz/target-faire.git
 
 | Field | Required | Description |
 |---|---|---|
-| `api_token` | Yes | Faire API access token, sent as `X-FAIRE-ACCESS-TOKEN` header |
+| `api_key` | Yes | Faire API access token, sent as `X-FAIRE-ACCESS-TOKEN` header |
 | `api_url` | No | Base API URL. Defaults to `https://www.faire.com/external-api/v2`. Set to `https://www.faire-stage.com/external-api/v2` for the stage environment |
 
 Example `config.json`:
 
 ```json
 {
-  "api_token": "your_faire_api_token_here",
+  "api_key": "your_faire_api_key_here",
   "api_url": "https://www.faire.com/external-api/v2"
 }
 ```
 
 ### Source Authentication and Authorization
 
-Faire uses a static API token. Obtain it from the Faire Brand Portal under Settings > API. Pass it as the `api_token` config field; the target sends it as the `X-FAIRE-ACCESS-TOKEN` HTTP header on every request.
+Faire uses a static API token. Obtain it from the Faire Brand Portal under Settings > API. Pass it as the `api_key` config field; the target sends it as the `X-FAIRE-ACCESS-TOKEN` HTTP header on every request.
 
 ## Supported Streams
 

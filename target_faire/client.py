@@ -17,7 +17,7 @@ class FaireSink(HotglueSink):
 
     @property
     def http_headers(self) -> dict:
-        return {"X-FAIRE-ACCESS-TOKEN": self.config.get("api_token", "")}
+        return {"X-FAIRE-ACCESS-TOKEN": self.config.get("api_key", "")}
 
     def _extract_error_message(self, response: requests.Response) -> str:
         try:
