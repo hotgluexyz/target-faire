@@ -85,15 +85,11 @@ class ProductsSink(FaireSink):
     name = "Products"
 
     def preprocess_record(self, record: dict, context: dict) -> dict:
-        name = record.get("name")
-        if not name:
-            raise InvalidPayloadError("Record is missing required field: name")
-
         default_taxonomy = self.config.get("default_taxonomy_type_id")
         product_id = record.get("id")
         if pm.is_faire_product_id(product_id):
             payload = self.clean_payload({
-                "name": name,
+                "name": record.get("name"),
                 "description": record.get("description"),
                 "short_description": record.get("short_description"),
                 "unit_multiplier": record.get("unit_multiplier"),
@@ -101,13 +97,20 @@ class ProductsSink(FaireSink):
                 "made_in_country": record.get("made_in_country"),
                 "preorderable": record.get("preorderable"),
                 "lifecycle_state": record.get("lifecycle_state"),
-                "taxonomy_type": {"id": pm.taxonomy_type_id(record, default_taxonomy)},
+                # Only send taxonomy when present on the record; do not apply the
+                # config default on PATCH or partial updates would overwrite it.
+                "taxonomy_type": pm.taxonomy_type_payload(record),
             })
             return {
                 "action": "update",
                 "product_id": str(product_id),
                 "payload": payload,
             }
+
+        # name is required for create
+        name = record.get("name")
+        if not name:
+            raise InvalidPayloadError("Record is missing required field: name")
 
         currency = record.get("currency", "USD")
         country = record.get("country", "USA")
@@ -127,7 +130,7 @@ class ProductsSink(FaireSink):
             "made_in_country": record.get("made_in_country"),
             "preorderable": record.get("preorderable"),
             "lifecycle_state": record.get("lifecycle_state"),
-            "taxonomy_type": {"id": pm.taxonomy_type_id(record, default_taxonomy)},
+            "taxonomy_type": pm.taxonomy_type_payload(record, default_taxonomy),
             "variant_option_sets": pm.build_variant_option_sets(variants),
             "variants": faire_variants,
         })

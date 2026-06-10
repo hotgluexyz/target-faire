@@ -24,7 +24,7 @@ pip install git+https://github.com/hotgluexyz/target-faire.git
 |---|---|---|
 | `api_key` | Yes | Faire API access token, sent as `X-FAIRE-ACCESS-TOKEN` header |
 | `api_url` | No | Base API URL. Defaults to `https://www.faire.com/external-api/v2`. Set to `https://www.faire-stage.com/external-api/v2` for the stage environment |
-| `default_taxonomy_type_id` | No | Fallback Faire taxonomy type id (`tt_...`) for Products records that omit `category.id` |
+| `default_taxonomy_type_id` | No | Optional fallback Faire taxonomy type id (`tt_...`) when a Products record has no `category.id` |
 
 Example `config.json`:
 
@@ -68,31 +68,29 @@ Accepts records following the unified `Products` shape. A record without a Faire
 
 | Field | Required | Description |
 |---|---|---|
-| `name` | Yes | Product name |
-| `sku` | Yes* | Product SKU. Required when `variants` is empty; used as the default variant SKU and idempotence token on create |
+| `name` | Yes* | Product name. Required on create; optional on update |
+| `sku` | No | Product SKU. Used as the default variant SKU and idempotence token on create when present |
 | `id` | No | Faire product id (`p_...`) for updates. Omit or use a non-Faire id on create |
 | `description` | No | Full product description |
 | `short_description` | No | Short description (max 75 chars) |
-| `category` | Yes** | `{"id": "tt_...", "name": "..."}`. `id` is the Faire taxonomy type |
-| `taxonomy_type` | Yes** | Alias for `category` with Faire-native naming |
+| `category` | No | `{"id": "tt_...", "name": "..."}`. `id` is the Faire taxonomy type when provided |
+| `taxonomy_type` | No | Alias for `category` with Faire-native naming |
 | `unit_multiplier` | No | Case size. Defaults to `1` |
 | `minimum_order_quantity` | No | Minimum purchase quantity. Defaults to `1` |
 | `made_in_country` | No | ISO 3166-1 alpha-3 country code (e.g. `USA`) |
 | `currency` | No | Variant price currency. Defaults to `USD` |
 | `country` | No | Variant price geo country. Defaults to `USA` |
-| `variants` | Yes*** | Array of variant objects (see below) |
+| `variants` | No** | Array of variant objects (see below) |
 
-\* Required when no `variants` are provided.
+\* Required for create only. The Faire API rejects creates without a product name.
 
-\*\* Required unless `default_taxonomy_type_id` is set in config.
-
-\*\*\* When omitted, a single default variant is built from the product-level `sku`, `price`, and `cost`.
+\*\* When omitted, a single default variant is built from the product-level `sku`, `price`, and `cost`. At least one variant with wholesale and retail prices is required by the Faire API.
 
 Each variant object:
 
 | Field | Required | Description |
 |---|---|---|
-| `sku` | Yes | Variant SKU |
+| `sku` | No | Variant SKU |
 | `price` | Yes* | Retail price in dollars (unified field) |
 | `cost` | Yes* | Wholesale price in dollars (unified field) |
 | `retail_price_cents` | Yes* | Retail price in cents (alternative to `price`) |
@@ -100,7 +98,7 @@ Each variant object:
 | `available_quantity` | No | Initial inventory quantity |
 | `options` | No | `[{"name": "Size", "value": "M"}]` for multi-variant products |
 
-\* Provide either dollar fields (`price`/`cost`) or cent fields (`retail_price_cents`/`wholesale_price_cents`).
+\* The Faire API requires both wholesale and retail prices on each variant. Provide dollar fields (`price`/`cost`) or cent fields (`retail_price_cents`/`wholesale_price_cents`).
 
 Faire API:
 

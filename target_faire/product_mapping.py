@@ -65,8 +65,11 @@ def variant_idempotence_token(variant: dict) -> str:
     return _idempotence_token(token, "po_")
 
 
-def taxonomy_type_id(record: dict, default_taxonomy_type_id: Optional[str] = None) -> str:
-    """Resolve the Faire taxonomy type id (``tt_...``) from record fields or config."""
+def resolve_taxonomy_type_id(
+    record: dict,
+    default_taxonomy_type_id: Optional[str] = None,
+) -> Optional[str]:
+    """Resolve the Faire taxonomy type id (``tt_...``) when present on the record or config."""
     taxonomy = record.get("taxonomy_type") or {}
     category = record.get("category") or {}
     categories = record.get("categories") or []
@@ -78,12 +81,16 @@ def taxonomy_type_id(record: dict, default_taxonomy_type_id: Optional[str] = Non
         or (first_category.get("id") if isinstance(first_category, dict) else None)
         or default_taxonomy_type_id
     )
-    if not resolved:
-        raise InvalidPayloadError(
-            "Record is missing taxonomy type id (category.id, taxonomy_type.id, "
-            "or default_taxonomy_type_id in config)"
-        )
-    return str(resolved)
+    return str(resolved) if resolved else None
+
+
+def taxonomy_type_payload(
+    record: dict,
+    default_taxonomy_type_id: Optional[str] = None,
+) -> Optional[dict]:
+    """Return a Faire ``taxonomy_type`` object, or None when no id is available."""
+    taxonomy_id = resolve_taxonomy_type_id(record, default_taxonomy_type_id)
+    return {"id": taxonomy_id} if taxonomy_id else None
 
 
 def build_variant_option_sets(variants: list) -> list:
@@ -105,10 +112,6 @@ def build_faire_variant(
     country: str,
 ) -> dict:
     """Map one unified variant to a Faire API variant payload."""
-    sku = variant.get("sku")
-    if not sku:
-        raise InvalidPayloadError("Variant is missing required field: sku")
-
     wholesale = _variant_price_minor(
         variant, record.get("cost"),
         cents_key="wholesale_price_cents", dollars_key="cost", label="wholesale",
@@ -120,7 +123,6 @@ def build_faire_variant(
 
     faire_variant = {
         "idempotence_token": variant_idempotence_token(variant),
-        "sku": sku,
         "options": variant.get("options") or [],
         "prices": [{
             "geo_constraint": {"country": country},
@@ -128,6 +130,10 @@ def build_faire_variant(
             "retail_price": {"amount_minor": retail, "currency": currency},
         }],
     }
+
+    sku = variant.get("sku")
+    if sku:
+        faire_variant["sku"] = sku
 
     if variant.get("available_quantity") not in (None, ""):
         faire_variant["available_quantity"] = int(variant["available_quantity"])
@@ -142,10 +148,8 @@ def normalize_variants(record: dict) -> list:
         return variants
 
     sku = record.get("sku") or record.get("id")
-    if not sku or is_faire_product_id(sku):
-        raise InvalidPayloadError(
-            "Record is missing variants and has no sku for a default variant"
-        )
+    if is_faire_product_id(sku):
+        sku = None
 
     return [{
         "id": record.get("id"),
