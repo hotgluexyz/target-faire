@@ -118,10 +118,7 @@ class ProductsSink(FaireSink):
         ]
 
         payload = self.clean_payload({
-            "idempotence_token": pm.idempotence_token(
-                record.get("idempotence_token") or record.get("sku") or record.get("id"),
-                "p_",
-            ),
+            "idempotence_token": pm.product_idempotence_token(record),
             "name": name,
             "description": record.get("description"),
             "short_description": record.get("short_description"),

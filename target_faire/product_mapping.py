@@ -7,50 +7,66 @@ from hotglue_etl_exceptions import InvalidPayloadError
 
 
 def is_faire_product_id(value: Any) -> bool:
+    """Return True if value is an existing Faire product id (``p_...``)."""
     return bool(value) and str(value).startswith("p_")
 
 
-def dollars_to_minor(value: Any) -> Optional[int]:
+def _dollars_to_minor(value: Any) -> Optional[int]:
+    """Convert a dollar amount to minor currency units (cents), or None if absent."""
     if value in (None, ""):
         return None
     return round(float(value) * 100)
 
 
-def variant_wholesale_cents(variant: dict, product_cost: Any = None) -> int:
-    if variant.get("wholesale_price_cents") not in (None, ""):
-        return int(variant["wholesale_price_cents"])
-    cost = dollars_to_minor(variant.get("cost"))
-    if cost is not None:
-        return cost
-    product_cost_minor = dollars_to_minor(product_cost)
-    if product_cost_minor is not None:
-        return product_cost_minor
+def _variant_price_minor(
+    variant: dict,
+    product_level: Any,
+    *,
+    cents_key: str,
+    dollars_key: str,
+    label: str,
+) -> int:
+    """Resolve a variant price in minor units from cent or dollar fields."""
+    if variant.get(cents_key) not in (None, ""):
+        return int(variant[cents_key])
+    minor = _dollars_to_minor(variant.get(dollars_key))
+    if minor is not None:
+        return minor
+    minor = _dollars_to_minor(product_level)
+    if minor is not None:
+        return minor
     raise InvalidPayloadError(
-        "Variant is missing wholesale price (cost or wholesale_price_cents)"
+        f"Variant is missing {label} price ({dollars_key} or {cents_key})"
     )
 
 
-def variant_retail_cents(variant: dict, product_price: Any = None) -> int:
-    if variant.get("retail_price_cents") not in (None, ""):
-        return int(variant["retail_price_cents"])
-    price = dollars_to_minor(variant.get("price"))
-    if price is not None:
-        return price
-    product_price_minor = dollars_to_minor(product_price)
-    if product_price_minor is not None:
-        return product_price_minor
-    raise InvalidPayloadError(
-        "Variant is missing retail price (price or retail_price_cents)"
-    )
-
-
-def idempotence_token(record_id: Any, faire_prefix: str) -> str:
+def _idempotence_token(record_id: Any, faire_prefix: str) -> str:
+    """Return a stable idempotence token, or a new UUID if none is usable."""
     if record_id and not str(record_id).startswith(faire_prefix):
         return str(record_id)
     return str(uuid.uuid4())
 
 
+def product_idempotence_token(record: dict) -> str:
+    """Derive a stable product idempotence token for Faire create requests."""
+    token = record.get("idempotence_token") or record.get("sku") or record.get("id")
+    if not token:
+        skus = [v.get("sku") for v in record.get("variants") or [] if v.get("sku")]
+        if len(skus) == 1:
+            token = skus[0]
+        elif skus:
+            token = "|".join(sorted(skus))
+    return _idempotence_token(token, "p_")
+
+
+def variant_idempotence_token(variant: dict) -> str:
+    """Derive a stable variant idempotence token for Faire create requests."""
+    token = variant.get("idempotence_token") or variant.get("id") or variant.get("sku")
+    return _idempotence_token(token, "po_")
+
+
 def taxonomy_type_id(record: dict, default_taxonomy_type_id: Optional[str] = None) -> str:
+    """Resolve the Faire taxonomy type id (``tt_...``) from record fields or config."""
     taxonomy = record.get("taxonomy_type") or {}
     category = record.get("category") or {}
     categories = record.get("categories") or []
@@ -71,6 +87,7 @@ def taxonomy_type_id(record: dict, default_taxonomy_type_id: Optional[str] = Non
 
 
 def build_variant_option_sets(variants: list) -> list:
+    """Build Faire ``variant_option_sets`` from unified variant options."""
     option_sets = {}
     for variant in variants:
         for option in variant.get("options") or []:
@@ -87,15 +104,22 @@ def build_faire_variant(
     currency: str,
     country: str,
 ) -> dict:
+    """Map one unified variant to a Faire API variant payload."""
     sku = variant.get("sku")
     if not sku:
         raise InvalidPayloadError("Variant is missing required field: sku")
 
-    wholesale = variant_wholesale_cents(variant, record.get("cost"))
-    retail = variant_retail_cents(variant, record.get("price"))
+    wholesale = _variant_price_minor(
+        variant, record.get("cost"),
+        cents_key="wholesale_price_cents", dollars_key="cost", label="wholesale",
+    )
+    retail = _variant_price_minor(
+        variant, record.get("price"),
+        cents_key="retail_price_cents", dollars_key="price", label="retail",
+    )
 
     faire_variant = {
-        "idempotence_token": idempotence_token(variant.get("id"), "po_"),
+        "idempotence_token": variant_idempotence_token(variant),
         "sku": sku,
         "options": variant.get("options") or [],
         "prices": [{
@@ -112,6 +136,7 @@ def build_faire_variant(
 
 
 def normalize_variants(record: dict) -> list:
+    """Return variant list from the record, synthesizing one when omitted."""
     variants = record.get("variants") or []
     if variants:
         return variants
