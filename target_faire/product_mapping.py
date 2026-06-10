@@ -11,6 +11,11 @@ def is_faire_product_id(value: Any) -> bool:
     return bool(value) and str(value).startswith("p_")
 
 
+def is_faire_variant_id(value: Any) -> bool:
+    """Return True if value is an existing Faire variant id (``po_...``)."""
+    return bool(value) and str(value).startswith("po_")
+
+
 def _dollars_to_minor(value: Any) -> Optional[int]:
     """Convert a dollar amount to minor currency units (cents), or None if absent."""
     if value in (None, ""):
@@ -40,29 +45,38 @@ def _variant_price_minor(
     )
 
 
-def _idempotence_token(record_id: Any, faire_prefix: str) -> str:
-    """Return a stable idempotence token, or a new UUID if none is usable."""
-    if record_id and not str(record_id).startswith(faire_prefix):
-        return str(record_id)
-    return str(uuid.uuid4())
-
-
 def product_idempotence_token(record: dict) -> str:
     """Derive a stable product idempotence token for Faire create requests."""
-    token = record.get("idempotence_token") or record.get("sku") or record.get("id")
-    if not token:
-        skus = [v.get("sku") for v in record.get("variants") or [] if v.get("sku")]
-        if len(skus) == 1:
-            token = skus[0]
-        elif skus:
-            token = "|".join(sorted(skus))
-    return _idempotence_token(token, "p_")
+    if record.get("idempotence_token") not in (None, ""):
+        return str(record["idempotence_token"])
+    if record.get("sku") not in (None, ""):
+        return str(record["sku"])
+
+    record_id = record.get("id")
+    if record_id and not is_faire_product_id(record_id):
+        return str(record_id)
+
+    skus = [v.get("sku") for v in record.get("variants") or [] if v.get("sku")]
+    if len(skus) == 1:
+        return skus[0]
+    if skus:
+        return "|".join(sorted(skus))
+
+    return str(uuid.uuid4())
 
 
 def variant_idempotence_token(variant: dict) -> str:
     """Derive a stable variant idempotence token for Faire create requests."""
-    token = variant.get("idempotence_token") or variant.get("id") or variant.get("sku")
-    return _idempotence_token(token, "po_")
+    if variant.get("idempotence_token") not in (None, ""):
+        return str(variant["idempotence_token"])
+    if variant.get("sku") not in (None, ""):
+        return str(variant["sku"])
+
+    variant_id = variant.get("id")
+    if variant_id and not is_faire_variant_id(variant_id):
+        return str(variant_id)
+
+    return str(uuid.uuid4())
 
 
 def resolve_taxonomy_type_id(
