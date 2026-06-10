@@ -3,6 +3,7 @@
 from hotglue_etl_exceptions import InvalidPayloadError
 
 from target_faire.client import FaireSink
+from target_faire import product_mapping as pm
 
 
 class FulfillmentsSink(FaireSink):
@@ -67,3 +68,92 @@ class FulfillmentsSink(FaireSink):
         shipment_id = last.get("id") if isinstance(last, dict) else None
         self.logger.info(f"Shipped order {order_id}, shipment_id={shipment_id}")
         return shipment_id, True, state_updates
+
+
+class ProductsSink(FaireSink):
+    """Creates or updates products in Faire.
+
+    Accepts records following the unified Products shape. New products are
+    created via POST /products; existing Faire products (id starting with
+    ``p_``) are updated via PATCH /products/{id}.
+
+    Faire API:
+      - POST /external-api/v2/products
+      - PATCH /external-api/v2/products/{product_id}
+    """
+
+    name = "Products"
+
+    def preprocess_record(self, record: dict, context: dict) -> dict:
+        name = record.get("name")
+        if not name:
+            raise InvalidPayloadError("Record is missing required field: name")
+
+        default_taxonomy = self.config.get("default_taxonomy_type_id")
+        product_id = record.get("id")
+        if pm.is_faire_product_id(product_id):
+            payload = self.clean_payload({
+                "name": name,
+                "description": record.get("description"),
+                "short_description": record.get("short_description"),
+                "unit_multiplier": record.get("unit_multiplier"),
+                "minimum_order_quantity": record.get("minimum_order_quantity"),
+                "made_in_country": record.get("made_in_country"),
+                "preorderable": record.get("preorderable"),
+                "lifecycle_state": record.get("lifecycle_state"),
+                "taxonomy_type": {"id": pm.taxonomy_type_id(record, default_taxonomy)},
+            })
+            return {
+                "action": "update",
+                "product_id": str(product_id),
+                "payload": payload,
+            }
+
+        currency = record.get("currency", "USD")
+        country = record.get("country", "USA")
+        variants = pm.normalize_variants(record)
+        faire_variants = [
+            pm.build_faire_variant(variant, record, currency, country)
+            for variant in variants
+        ]
+
+        payload = self.clean_payload({
+            "idempotence_token": pm.idempotence_token(
+                record.get("idempotence_token") or record.get("sku") or record.get("id"),
+                "p_",
+            ),
+            "name": name,
+            "description": record.get("description"),
+            "short_description": record.get("short_description"),
+            "unit_multiplier": record.get("unit_multiplier", 1),
+            "minimum_order_quantity": record.get("minimum_order_quantity", 1),
+            "made_in_country": record.get("made_in_country"),
+            "preorderable": record.get("preorderable"),
+            "lifecycle_state": record.get("lifecycle_state"),
+            "taxonomy_type": {"id": pm.taxonomy_type_id(record, default_taxonomy)},
+            "variant_option_sets": pm.build_variant_option_sets(variants),
+            "variants": faire_variants,
+        })
+        return {"action": "create", "payload": payload}
+
+    def upsert_record(self, record: dict, context: dict):
+        state_updates = {}
+        action = record["action"]
+        payload = record["payload"]
+
+        if action == "update":
+            product_id = record["product_id"]
+            response = self.request_api(
+                "PATCH",
+                endpoint=f"products/{product_id}",
+                request_data=payload,
+            )
+            result = response.json()
+            self.logger.info(f"Updated product {product_id}")
+            return result.get("id", product_id), True, state_updates
+
+        response = self.request_api("POST", endpoint="products", request_data=payload)
+        result = response.json()
+        product_id = result.get("id")
+        self.logger.info(f"Created product {product_id}")
+        return product_id, True, state_updates

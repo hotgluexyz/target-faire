@@ -2,7 +2,7 @@
 
 `target-faire` is a Singer target for [Faire](https://www.faire.com), built with the [Hotglue Singer SDK](https://github.com/hotgluexyz/HotglueSingerSDK) for Singer Targets.
 
-It writes order fulfillment/shipment data back to Faire as orders are shipped in an upstream system (e.g. Linnworks).
+It writes order fulfillment/shipment data and product catalog data back to Faire from upstream systems.
 
 ## Installation
 
@@ -24,6 +24,7 @@ pip install git+https://github.com/hotgluexyz/target-faire.git
 |---|---|---|
 | `api_key` | Yes | Faire API access token, sent as `X-FAIRE-ACCESS-TOKEN` header |
 | `api_url` | No | Base API URL. Defaults to `https://www.faire.com/external-api/v2`. Set to `https://www.faire-stage.com/external-api/v2` for the stage environment |
+| `default_taxonomy_type_id` | No | Fallback Faire taxonomy type id (`tt_...`) for Products records that omit `category.id` |
 
 Example `config.json`:
 
@@ -43,6 +44,7 @@ Faire uses a static API token. Obtain it from the Faire Brand Portal under Setti
 | Stream | Description |
 |---|---|
 | `Fulfillments` | Marks a Faire order as shipped and attaches tracking information |
+| `Products` | Creates or updates products in the Faire catalog |
 
 ### Fulfillments stream
 
@@ -60,18 +62,64 @@ Accepts records following the unified `SalesOrder` shape. Required and optional 
 
 Faire API: `POST /external-api/v2/orders/{order_id}/shipments`
 
+### Products stream
+
+Accepts records following the unified `Products` shape. A record without a Faire product id creates a new product; a record with `id` starting with `p_` updates product metadata.
+
+| Field | Required | Description |
+|---|---|---|
+| `name` | Yes | Product name |
+| `sku` | Yes* | Product SKU. Required when `variants` is empty; used as the default variant SKU and idempotence token on create |
+| `id` | No | Faire product id (`p_...`) for updates. Omit or use a non-Faire id on create |
+| `description` | No | Full product description |
+| `short_description` | No | Short description (max 75 chars) |
+| `category` | Yes** | `{"id": "tt_...", "name": "..."}`. `id` is the Faire taxonomy type |
+| `taxonomy_type` | Yes** | Alias for `category` with Faire-native naming |
+| `unit_multiplier` | No | Case size. Defaults to `1` |
+| `minimum_order_quantity` | No | Minimum purchase quantity. Defaults to `1` |
+| `made_in_country` | No | ISO 3166-1 alpha-3 country code (e.g. `USA`) |
+| `currency` | No | Variant price currency. Defaults to `USD` |
+| `country` | No | Variant price geo country. Defaults to `USA` |
+| `variants` | Yes*** | Array of variant objects (see below) |
+
+\* Required when no `variants` are provided.
+
+\*\* Required unless `default_taxonomy_type_id` is set in config.
+
+\*\*\* When omitted, a single default variant is built from the product-level `sku`, `price`, and `cost`.
+
+Each variant object:
+
+| Field | Required | Description |
+|---|---|---|
+| `sku` | Yes | Variant SKU |
+| `price` | Yes* | Retail price in dollars (unified field) |
+| `cost` | Yes* | Wholesale price in dollars (unified field) |
+| `retail_price_cents` | Yes* | Retail price in cents (alternative to `price`) |
+| `wholesale_price_cents` | Yes* | Wholesale price in cents (alternative to `cost`) |
+| `available_quantity` | No | Initial inventory quantity |
+| `options` | No | `[{"name": "Size", "value": "M"}]` for multi-variant products |
+
+\* Provide either dollar fields (`price`/`cost`) or cent fields (`retail_price_cents`/`wholesale_price_cents`).
+
+Faire API:
+
+- `POST /external-api/v2/products` (create)
+- `PATCH /external-api/v2/products/{product_id}` (update metadata)
+
 ## Usage
 
 Pipe tap output directly into the target:
 
 ```bash
-tap-linnworks --config tap_config.json | target-faire --config config.json
+tap-your-source --config tap_config.json | target-faire --config config.json
 ```
 
 Or run against a sample Singer file:
 
 ```bash
-cat sample_payload/data.singer | target-faire --config .secrets/config.json
+cat sample_payload/fulfillments.singer | target-faire --config .secrets/config.json
+cat sample_payload/products.singer | target-faire --config .secrets/config.json
 ```
 
 ## Developer Resources
