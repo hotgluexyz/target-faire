@@ -1,22 +1,23 @@
 """Map unified Products records to Faire API payloads."""
 
+import re
 import uuid
 from typing import Any, Optional
 
 from hotglue_etl_exceptions import InvalidPayloadError
 
+_FAIRE_PRODUCT_ID = re.compile(r"^p_[0-9a-z]{10}$")
+_FAIRE_VARIANT_ID = re.compile(r"^po_[0-9a-z]{10}$")
+
 
 def is_faire_variant_id(value: Any) -> bool:
-    """Return True if value is an existing Faire variant id (``po_...``)."""
-    return bool(value) and str(value).startswith("po_")
+    """Return True if value matches the Faire variant id format (``po_`` + 10 chars)."""
+    return bool(value) and bool(_FAIRE_VARIANT_ID.fullmatch(str(value)))
 
 
 def is_faire_product_id(value: Any) -> bool:
-    """Return True if value is an existing Faire product id (``p_...``, not ``po_...``)."""
-    if not value:
-        return False
-    candidate = str(value)
-    return candidate.startswith("p_") and not is_faire_variant_id(candidate)
+    """Return True if value matches the Faire product id format (``p_`` + 10 chars)."""
+    return bool(value) and bool(_FAIRE_PRODUCT_ID.fullmatch(str(value)))
 
 
 def is_faire_managed_id(value: Any) -> bool:
@@ -54,7 +55,11 @@ def _variant_price_minor(
 
 
 def product_idempotence_token(record: dict) -> str:
-    """Derive a stable product idempotence token for Faire create requests."""
+    """Derive a product idempotence token for Faire create requests.
+
+    Uses record fields when present for retry safety; otherwise generates a UUID
+    (accepted by the API, but retries may create duplicates).
+    """
     if record.get("idempotence_token") not in (None, ""):
         return str(record["idempotence_token"])
     if record.get("sku") not in (None, ""):
@@ -74,7 +79,7 @@ def product_idempotence_token(record: dict) -> str:
 
 
 def variant_idempotence_token(variant: dict) -> str:
-    """Derive a stable variant idempotence token for Faire create requests."""
+    """Derive a variant idempotence token for Faire create requests."""
     if variant.get("idempotence_token") not in (None, ""):
         return str(variant["idempotence_token"])
     if variant.get("sku") not in (None, ""):

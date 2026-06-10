@@ -74,8 +74,8 @@ class ProductsSink(FaireSink):
     """Creates or updates products in Faire.
 
     Accepts records following the unified Products shape. New products are
-    created via POST /products; existing Faire products (``p_...`` ids, not
-    variant ``po_...`` ids) are updated via PATCH /products/{id}.
+    created via POST /products; existing Faire products (ids matching
+    ``p_[0-9a-z]{10}``) are updated via PATCH /products/{id}.
 
     Faire API:
       - POST /external-api/v2/products

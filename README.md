@@ -64,13 +64,14 @@ Faire API: `POST /external-api/v2/orders/{order_id}/shipments`
 
 ### Products stream
 
-Accepts records following the unified `Products` shape. A record without a Faire product id creates a new product; a record with `id` set to a Faire product id (`p_...`, not variant `po_...`) updates product metadata.
+Accepts records following the unified `Products` shape. A record without a Faire product id creates a new product; a record whose `id` matches the Faire product id format (`p_` plus 10 lowercase alphanumeric characters) updates product metadata.
 
 | Field | Required | Description |
 |---|---|---|
 | `name` | Yes* | Product name. Required on create; optional on update |
 | `sku` | No | Product SKU. Used as the default variant SKU and idempotence token on create when present |
-| `id` | No | Faire product id (`p_...`) for updates. Variant ids (`po_...`) and other upstream ids are treated as create/idempotence keys |
+| `idempotence_token` | No | Explicit idempotence key for create. Recommended for retry safety |
+| `id` | No | Faire product id for updates when it matches the `p_` + 10 char format. Other upstream ids may be used as create idempotence keys |
 | `description` | No | Full product description |
 | `short_description` | No | Short description (max 75 chars) |
 | `category` | No | `{"id": "tt_...", "name": "..."}`. `id` is the Faire taxonomy type when provided |
@@ -85,6 +86,7 @@ Accepts records following the unified `Products` shape. A record without a Faire
 \* Required for create only. The Faire API rejects creates without a product name.
 
 \*\* When omitted, a single default variant is built from the product-level `sku`, `price`, and `cost`. At least one variant with wholesale and retail prices is required by the Faire API.
+
 
 Each variant object:
 
