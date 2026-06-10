@@ -64,13 +64,13 @@ Faire API: `POST /external-api/v2/orders/{order_id}/shipments`
 
 ### Products stream
 
-Accepts records following the unified `Products` shape. A record without a Faire product id creates a new product; a record with `id` starting with `p_` updates product metadata.
+Accepts records following the unified `Products` shape. A record without a Faire product id creates a new product; a record with `id` set to a Faire product id (`p_...`, not variant `po_...`) updates product metadata.
 
 | Field | Required | Description |
 |---|---|---|
 | `name` | Yes* | Product name. Required on create; optional on update |
 | `sku` | No | Product SKU. Used as the default variant SKU and idempotence token on create when present |
-| `id` | No | Faire product id (`p_...`) for updates. Omit or use a non-Faire id on create |
+| `id` | No | Faire product id (`p_...`) for updates. Variant ids (`po_...`) and other upstream ids are treated as create/idempotence keys |
 | `description` | No | Full product description |
 | `short_description` | No | Short description (max 75 chars) |
 | `category` | No | `{"id": "tt_...", "name": "..."}`. `id` is the Faire taxonomy type when provided |

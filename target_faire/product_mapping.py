@@ -6,14 +6,22 @@ from typing import Any, Optional
 from hotglue_etl_exceptions import InvalidPayloadError
 
 
-def is_faire_product_id(value: Any) -> bool:
-    """Return True if value is an existing Faire product id (``p_...``)."""
-    return bool(value) and str(value).startswith("p_")
-
-
 def is_faire_variant_id(value: Any) -> bool:
     """Return True if value is an existing Faire variant id (``po_...``)."""
     return bool(value) and str(value).startswith("po_")
+
+
+def is_faire_product_id(value: Any) -> bool:
+    """Return True if value is an existing Faire product id (``p_...``, not ``po_...``)."""
+    if not value:
+        return False
+    candidate = str(value)
+    return candidate.startswith("p_") and not is_faire_variant_id(candidate)
+
+
+def is_faire_managed_id(value: Any) -> bool:
+    """Return True if value is a Faire-assigned product or variant id."""
+    return is_faire_product_id(value) or is_faire_variant_id(value)
 
 
 def _dollars_to_minor(value: Any) -> Optional[int]:
@@ -162,7 +170,7 @@ def normalize_variants(record: dict) -> list:
         return variants
 
     sku = record.get("sku") or record.get("id")
-    if is_faire_product_id(sku):
+    if is_faire_managed_id(sku):
         sku = None
 
     return [{

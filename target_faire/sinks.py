@@ -74,8 +74,8 @@ class ProductsSink(FaireSink):
     """Creates or updates products in Faire.
 
     Accepts records following the unified Products shape. New products are
-    created via POST /products; existing Faire products (id starting with
-    ``p_``) are updated via PATCH /products/{id}.
+    created via POST /products; existing Faire products (``p_...`` ids, not
+    variant ``po_...`` ids) are updated via PATCH /products/{id}.
 
     Faire API:
       - POST /external-api/v2/products
@@ -101,6 +101,11 @@ class ProductsSink(FaireSink):
                 # config default on PATCH or partial updates would overwrite it.
                 "taxonomy_type": pm.taxonomy_type_payload(record),
             })
+            if not payload:
+                raise InvalidPayloadError(
+                    "Update record has no fields to send for product "
+                    f"{product_id}"
+                )
             return {
                 "action": "update",
                 "product_id": str(product_id),
