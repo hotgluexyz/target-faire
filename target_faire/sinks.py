@@ -40,7 +40,7 @@ class FulfillmentsSink(FaireSink):
             "carrier": carrier,
             "maker_cost": {
                 "amount_minor": cost_minor,
-                "currency": record.get("currency", "USD"),
+                "currency": record.get("currency") or "USD",
             },
         }
 
@@ -117,8 +117,8 @@ class ProductsSink(FaireSink):
         if not name:
             raise InvalidPayloadError("Record is missing required field: name")
 
-        currency = record.get("currency", "USD")
-        country = record.get("country", "USA")
+        currency = record.get("currency") or "USD"
+        country = record.get("country") or "USA"
         variants = pm.normalize_variants(record)
         faire_variants = [
             pm.build_faire_variant(variant, record, currency, country)
