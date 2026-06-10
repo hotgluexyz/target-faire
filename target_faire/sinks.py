@@ -50,15 +50,27 @@ class FulfillmentsSink(FaireSink):
 
         return {"order_id": order_id, "shipment": shipment}
 
+    # Faire 400 when an order is past the point where shipments can be added or updated.
+    _SHIPMENT_PAYMENT_INITIATED_ERR = "as payment is already initiated"
+
     def upsert_record(self, record: dict, context: dict):
         state_updates = {}
         order_id = record["order_id"]
 
-        response = self.request_api(
-            "POST",
-            endpoint=f"orders/{order_id}/shipments",
-            request_data={"shipments": [record["shipment"]]},
-        )
+        try:
+            response = self.request_api(
+                "POST",
+                endpoint=f"orders/{order_id}/shipments",
+                request_data={"shipments": [record["shipment"]]},
+            )
+        except InvalidPayloadError as exc:
+            if self._SHIPMENT_PAYMENT_INITIATED_ERR in str(exc).lower():
+                self.logger.warning(
+                    "Skipping shipment for order %s: payment already initiated",
+                    order_id,
+                )
+                return order_id, True, {"existing": True}
+            raise
 
         try:
             shipments = response.json().get("shipments", [])
