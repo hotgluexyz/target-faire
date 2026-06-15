@@ -1,0 +1,3 @@
+{"type": "SCHEMA", "stream": "ProductVariants", "schema": {"type": ["object", "null"], "properties": {"sku": {"type": ["string", "null"]}, "available_quantity": {"type": ["integer", "null"]}}}, "key_properties": ["sku"]}
+{"type": "RECORD", "stream": "ProductVariants", "record": {"sku": "SAMPLE-TARGET-FAIRE-001", "available_quantity": 15}}
+{"type": "STATE", "value": {}}

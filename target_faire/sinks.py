@@ -1,34 +1,9 @@
 """Faire target sink classes."""
 
-from typing import Any, Dict, List, Optional, Tuple
-
 from hotglue_etl_exceptions import InvalidPayloadError
 
 from target_faire.client import FaireSink
 from target_faire import product_mapping as pm
-
-# Fields accepted on PATCH /products/{product_id}/variants/{variant_id}
-# (see https://developers.faire.com/docs#/paths/products-product_id--variants--variant_id/patch).
-_VARIANT_PATCH_KEYS = frozenset({
-    "name",
-    "sale_state",
-    "lifecycle_state",
-    "idempotence_token",
-    "sku",
-    "available_quantity",
-    "backordered_until",
-    "wholesale_price_cents",
-    "retail_price_cents",
-    "tariff_code",
-    "images",
-    "options",
-    "prices",
-    "variant_preorder_details",
-    "measurements",
-    "gtin",
-    "orderability_type",
-    "case_measurements",
-})
 
 
 class FulfillmentsSink(FaireSink):
@@ -202,196 +177,43 @@ class ProductsSink(FaireSink):
 
 
 class ProductVariantsSink(FaireSink):
-    """Updates an existing Faire product variant.
+    """Updates on-hand inventory for an existing Faire variant by SKU.
 
-    Resolves ``product_id`` and ``variant_id`` from ``product_id``, ``variant_id``,
-    and ``id`` when they match Faire id formats. If the variant id is missing (or
-    ``id`` is null / not a Faire variant id), looks up both ids using ``sku``
-    via ``GET /products?sku=``.
-
-    When ``variant_id`` is known but ``product_id`` is missing, ``sku`` is used
-    to list products and find the product that contains that variant.
-
-    Faire API: ``PATCH /external-api/v2/products/{product_id}/variants/{variant_id}``
-    (see Faire developer docs).
+    Faire API: ``PATCH /external-api/v2/product-inventory/by-skus``
     """
 
     name = "ProductVariants"
 
-    def _products_from_list_response(self, response) -> List[dict]:
-        try:
-            data = response.json()
-        except Exception:
-            return []
-        products = data.get("products")
-        if isinstance(products, list):
-            return [p for p in products if isinstance(p, dict)]
-        return []
-
-    def _fetch_product_document(self, product_id: str) -> Optional[dict]:
-        response = self.request_api("GET", endpoint=f"products/{product_id}")
-        try:
-            data = response.json()
-        except Exception:
-            return None
-        if isinstance(data.get("product"), dict):
-            return data["product"]
-        if isinstance(data, dict) and pm.is_faire_product_id(data.get("id")):
-            return data
-        return None
-
-    def _variants_for_product(self, product: dict) -> List[dict]:
-        variants = product.get("variants")
-        if isinstance(variants, list) and variants:
-            return [v for v in variants if isinstance(v, dict)]
-        pid = product.get("id")
-        if pm.is_faire_product_id(pid):
-            full = self._fetch_product_document(str(pid))
-            if full:
-                v2 = full.get("variants")
-                if isinstance(v2, list):
-                    return [v for v in v2 if isinstance(v, dict)]
-        return []
-
-    def _lookup_product_variant_by_sku(self, sku: str) -> Tuple[Optional[str], Optional[str]]:
-        """Return ``(product_id, variant_id)`` for an exact SKU match, or ``(None, None)``."""
-        sku_key = str(sku).strip()
-        if not sku_key:
-            return None, None
-        response = self.request_api(
-            "GET",
-            endpoint="products",
-            params={"sku": sku_key, "limit": 50},
-        )
-        for product in self._products_from_list_response(response):
-            for variant in self._variants_for_product(product):
-                if str(variant.get("sku", "")).strip() == sku_key:
-                    pid, vid = product.get("id"), variant.get("id")
-                    if pm.is_faire_product_id(pid) and pm.is_faire_variant_id(vid):
-                        return str(pid), str(vid)
-        return None, None
-
-    def _product_id_containing_variant(self, variant_id: str, sku: str) -> Optional[str]:
-        """Return product id for ``variant_id`` using a SKU list lookup."""
-        sku_key = str(sku).strip()
-        if not sku_key or not pm.is_faire_variant_id(variant_id):
-            return None
-        response = self.request_api(
-            "GET",
-            endpoint="products",
-            params={"sku": sku_key, "limit": 50},
-        )
-        for product in self._products_from_list_response(response):
-            for variant in self._variants_for_product(product):
-                if variant.get("id") == variant_id:
-                    pid = product.get("id")
-                    if pm.is_faire_product_id(pid):
-                        return str(pid)
-        return None
-
-    def _resolve_patch_targets(self, record: dict) -> Tuple[str, str]:
-        product_id = record.get("product_id")
-        variant_id = record.get("variant_id")
-        rid = record.get("id")
-
-        if variant_id in (None, "") and rid not in (None, ""):
-            if pm.is_faire_variant_id(rid):
-                variant_id = rid
-        if product_id in (None, "") and rid not in (None, ""):
-            if pm.is_faire_product_id(rid):
-                product_id = rid
-
-        sku_raw = record.get("sku")
-        sku = str(sku_raw).strip() if sku_raw not in (None, "") else None
-
-        if sku and (
-            not pm.is_faire_variant_id(variant_id)
-            or not pm.is_faire_product_id(product_id)
-        ):
-            lp, lv = self._lookup_product_variant_by_sku(sku)
-            if not pm.is_faire_variant_id(variant_id) and lv:
-                variant_id = lv
-            if not pm.is_faire_product_id(product_id) and lp:
-                product_id = lp
-
-        if pm.is_faire_variant_id(variant_id) and not pm.is_faire_product_id(product_id):
-            if sku:
-                lp = self._product_id_containing_variant(str(variant_id), sku)
-                if lp:
-                    product_id = lp
-
-        if not pm.is_faire_product_id(product_id):
-            raise InvalidPayloadError(
-                "Record needs a Faire product_id (or id in product id format), "
-                "or a sku that matches a Faire variant"
-            )
-        if not pm.is_faire_variant_id(variant_id):
-            raise InvalidPayloadError(
-                "Record needs a Faire variant id on id/variant_id, "
-                "or a sku that matches a Faire variant"
-            )
-        return str(product_id), str(variant_id)
-
-    def _variant_patch_payload(self, record: dict) -> dict:
-        body: Dict[str, Any] = {
-            k: record[k] for k in _VARIANT_PATCH_KEYS if k in record and k != "prices"
-        }
-        if "prices" in record:
-            body["prices"] = record["prices"]
-        if "available_quantity" in body:
-            body["available_quantity"] = int(body["available_quantity"])
-
-        currency = record.get("currency") or "USD"
-        country = record.get("country") or "USA"
-        if "prices" not in body:
-            has_flat_cents = (
-                record.get("wholesale_price_cents") not in (None, "")
-                or record.get("retail_price_cents") not in (None, "")
-            )
-            if not has_flat_cents:
-                vslice = {
-                    "cost": record.get("cost"),
-                    "price": record.get("price"),
-                    "wholesale_price_cents": record.get("wholesale_price_cents"),
-                    "retail_price_cents": record.get("retail_price_cents"),
-                }
-                if any(v not in (None, "") for v in vslice.values()):
-                    body["prices"] = pm.faire_variant_prices_array(
-                        vslice, record, currency, country
-                    )
-
-        return self.clean_payload(body)
-
     def preprocess_record(self, record: dict, context: dict) -> dict:
-        product_id, variant_id = self._resolve_patch_targets(record)
-        payload = self._variant_patch_payload(record)
-        if not payload:
-            raise InvalidPayloadError(
-                f"No variant fields to PATCH for product {product_id} variant {variant_id}"
-            )
+        sku = record.get("sku")
+        if sku in (None, ""):
+            raise InvalidPayloadError("Record is missing required field: sku")
+
+        quantity = record.get("available_quantity")
+        if quantity in (None, ""):
+            raise InvalidPayloadError("Record is missing required field: available_quantity")
+
         return {
-            "product_id": product_id,
-            "variant_id": variant_id,
-            "payload": payload,
+            "sku": str(sku).strip(),
+            "available_quantity": int(quantity),
         }
 
     def upsert_record(self, record: dict, context: dict):
-        state_updates = {}
-        product_id = record["product_id"]
-        variant_id = record["variant_id"]
-        response = self.request_api(
+        sku = record["sku"]
+        available_quantity = record["available_quantity"]
+        self.request_api(
             "PATCH",
-            endpoint=f"products/{product_id}/variants/{variant_id}",
-            request_data=record["payload"],
+            endpoint="product-inventory/by-skus",
+            request_data={
+                "inventories": [{
+                    "sku": sku,
+                    "on_hand_quantity": available_quantity,
+                }],
+            },
         )
-        try:
-            result = response.json()
-        except Exception:
-            result = {}
-        vid = result.get("id", variant_id)
         self.logger.info(
-            "Updated product %s variant %s",
-            product_id,
-            vid,
+            "Updated inventory for sku %s to %s",
+            sku,
+            available_quantity,
         )
-        return vid, True, state_updates
+        return sku, True, {}
