@@ -45,6 +45,7 @@ Faire uses a static API token. Obtain it from the Faire Brand Portal under Setti
 |---|---|
 | `Fulfillments` | Marks a Faire order as shipped and attaches tracking information |
 | `Products` | Creates or updates products in the Faire catalog |
+| `ProductVariants` | Updates existing product variants (inventory, prices, etc.) via variant PATCH |
 
 ### Fulfillments stream
 
@@ -106,6 +107,28 @@ Faire API:
 
 - `POST /external-api/v2/products` (create)
 - `PATCH /external-api/v2/products/{product_id}` (update metadata)
+
+### ProductVariants stream
+
+Updates a single variant with `PATCH /external-api/v2/products/{product_id}/variants/{variant_id}` ([Faire docs](https://developers.faire.com/docs#/paths/products-product_id--variants--variant_id/patch)).
+
+| Field | Required | Description |
+|---|---|---|
+| `product_id` | No* | Faire product id (`p_` + 10 chars). May be taken from `id` when it matches that format |
+| `variant_id` | No* | Faire variant id (`po_` + 10 chars). May be taken from `id` when it matches that format |
+| `id` | No | Convenience: set to the Faire product id or variant id when only one of those is sent |
+| `sku` | No** | Used with `GET /products?sku=` to resolve missing product and/or variant ids |
+| `currency` | No | Used when deriving `prices` from `cost` / `price`. Defaults to `USD` |
+| `country` | No | Geo on derived `prices`. Defaults to `USA` |
+| `available_quantity` | No | On-hand quantity |
+| `cost` / `price` | No | Wholesale / retail in dollars; used to build `prices` when `prices` and cent fields are absent |
+| `wholesale_price_cents` / `retail_price_cents` | No | Sent as-is on the PATCH when set (Faire example includes these fields) |
+| `prices` | No | Full Faire price objects; used as-is when present |
+| Other PATCH fields | No | Passed through when present: `name`, `sale_state`, `lifecycle_state`, `idempotence_token`, `sku`, `backordered_until`, `tariff_code`, `images`, `options`, `variant_preorder_details`, `measurements`, `gtin`, `orderability_type`, `case_measurements` |
+
+\* At least one way to resolve both Faire ids is required: explicit `product_id` and `variant_id` / `id`, or a `sku` that matches a variant in the catalog (see `sku`).
+
+\*\* Required when the variant id cannot be determined from `id` / `variant_id`, or when `variant_id` is known but `product_id` is missing (lookup finds the product that contains that variant for the same SKU).
 
 ## Usage
 
