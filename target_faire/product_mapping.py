@@ -132,13 +132,13 @@ def build_variant_option_sets(variants: list) -> list:
     return [{"name": name, "values": sorted(values)} for name, values in option_sets.items()]
 
 
-def faire_variant_prices_array(
+def build_faire_variant(
     variant: dict,
     record: dict,
     currency: str,
     country: str,
-) -> list:
-    """Build Faire ``prices`` for one variant (create or PATCH)."""
+) -> dict:
+    """Map one unified variant to a Faire API variant payload."""
     wholesale = _variant_price_minor(
         variant, record.get("cost"),
         cents_key="wholesale_price_cents", dollars_key="cost", label="wholesale",
@@ -147,24 +147,15 @@ def faire_variant_prices_array(
         variant, record.get("price"),
         cents_key="retail_price_cents", dollars_key="price", label="retail",
     )
-    return [{
-        "geo_constraint": {"country": country},
-        "wholesale_price": {"amount_minor": wholesale, "currency": currency},
-        "retail_price": {"amount_minor": retail, "currency": currency},
-    }]
 
-
-def build_faire_variant(
-    variant: dict,
-    record: dict,
-    currency: str,
-    country: str,
-) -> dict:
-    """Map one unified variant to a Faire API variant payload."""
     faire_variant = {
         "idempotence_token": variant_idempotence_token(variant),
         "options": variant.get("options") or [],
-        "prices": faire_variant_prices_array(variant, record, currency, country),
+        "prices": [{
+            "geo_constraint": {"country": country},
+            "wholesale_price": {"amount_minor": wholesale, "currency": currency},
+            "retail_price": {"amount_minor": retail, "currency": currency},
+        }],
     }
 
     sku = variant.get("sku")
