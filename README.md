@@ -45,6 +45,7 @@ Faire uses a static API token. Obtain it from the Faire Brand Portal under Setti
 |---|---|
 | `Fulfillments` | Marks a Faire order as shipped and attaches tracking information |
 | `Products` | Creates or updates products in the Faire catalog |
+| `ProductVariants` | Updates on-hand inventory for an existing variant by SKU |
 
 ### Fulfillments stream
 
@@ -107,6 +108,18 @@ Faire API:
 - `POST /external-api/v2/products` (create)
 - `PATCH /external-api/v2/products/{product_id}` (update metadata)
 
+### ProductVariants stream
+
+Updates on-hand inventory for an existing Faire variant by SKU via
+`PATCH /external-api/v2/product-inventory/by-skus` (`on_hand_quantity`).
+
+| Field | Required | Description |
+|---|---|---|
+| `sku` | Yes | Variant SKU to update |
+| `available_quantity` | Yes | On-hand quantity to set in Faire |
+
+Faire API: `PATCH /external-api/v2/product-inventory/by-skus`
+
 ## Usage
 
 Pipe tap output directly into the target:
@@ -120,6 +133,7 @@ Or run against a sample Singer file:
 ```bash
 cat sample_payload/fulfillments.singer | target-faire --config .secrets/config.json
 cat sample_payload/products.singer | target-faire --config .secrets/config.json
+cat sample_payload/product_variants.singer | target-faire --config .secrets/config.json
 ```
 
 ## Developer Resources

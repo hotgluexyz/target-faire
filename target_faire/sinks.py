@@ -174,3 +174,46 @@ class ProductsSink(FaireSink):
         product_id = result.get("id")
         self.logger.info(f"Created product {product_id}")
         return product_id, True, state_updates
+
+
+class ProductVariantsSink(FaireSink):
+    """Updates on-hand inventory for an existing Faire variant by SKU.
+
+    Faire API: ``PATCH /external-api/v2/product-inventory/by-skus``
+    """
+
+    name = "ProductVariants"
+
+    def preprocess_record(self, record: dict, context: dict) -> dict:
+        sku = record.get("sku")
+        if sku in (None, ""):
+            raise InvalidPayloadError("Record is missing required field: sku")
+
+        quantity = record.get("available_quantity")
+        if quantity in (None, ""):
+            raise InvalidPayloadError("Record is missing required field: available_quantity")
+
+        return {
+            "sku": str(sku).strip(),
+            "available_quantity": int(quantity),
+        }
+
+    def upsert_record(self, record: dict, context: dict):
+        sku = record["sku"]
+        available_quantity = record["available_quantity"]
+        self.request_api(
+            "PATCH",
+            endpoint="product-inventory/by-skus",
+            request_data={
+                "inventories": [{
+                    "sku": sku,
+                    "on_hand_quantity": available_quantity,
+                }],
+            },
+        )
+        self.logger.info(
+            "Updated inventory for sku %s to %s",
+            sku,
+            available_quantity,
+        )
+        return sku, True, {}

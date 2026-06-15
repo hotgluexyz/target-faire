@@ -5,13 +5,13 @@ from hotglue_singer_sdk.helpers.capabilities import AlertingLevel
 from hotglue_singer_sdk.target_sdk.target import TargetHotglue
 
 from target_faire.client import FAIRE_DEFAULT_API_URL
-from target_faire.sinks import FulfillmentsSink, ProductsSink
+from target_faire.sinks import FulfillmentsSink, ProductVariantsSink, ProductsSink
 
 
 class TargetFaire(TargetHotglue):
     """Singer target for Faire."""
 
-    SINK_TYPES = [FulfillmentsSink, ProductsSink]
+    SINK_TYPES = [FulfillmentsSink, ProductsSink, ProductVariantsSink]
     name = "target-faire"
     alerting_level = AlertingLevel.ERROR
 
