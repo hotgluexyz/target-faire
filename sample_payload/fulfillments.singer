@@ -1,0 +1,3 @@
+{"type": "SCHEMA", "stream": "Fulfillments", "schema": {"type": ["object", "null"], "properties": {"order_id": {"type": ["string", "null"]}, "tracking_number": {"type": ["string", "null"]}, "carrier": {"type": ["string", "null"]}, "shipping_cost_cents": {"type": ["integer", "null"]}, "total_shipping": {"type": ["number", "null"]}, "currency": {"type": ["string", "null"]}, "item_ids": {"type": ["array", "null"], "items": {"type": "string"}}}}, "key_properties": ["order_id"]}
+{"type": "RECORD", "stream": "Fulfillments", "record": {"order_id": "bo_tcpqaufh7j", "tracking_number": "1Z999AA10123456784", "carrier": "UPS", "shipping_cost_cents": 600, "currency": "USD"}}
+{"type": "STATE", "value": {}}
