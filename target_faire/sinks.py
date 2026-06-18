@@ -193,8 +193,23 @@ class ProductVariantsSink(FaireBatchSink):
         return inv.normalize_inventory_record(record)
 
     def process_record(self, record: dict, context: dict) -> None:
-        """Normalize and stage a record for the next inventory batch."""
-        super().process_record(self.preprocess_record(record, context), context)
+        """Normalize and stage a record, writing state immediately on validation errors."""
+        try:
+            normalized = self.preprocess_record(record, context)
+        except InvalidPayloadError as exc:
+            if not self.latest_state:
+                self.init_state()
+            state = {
+                "success": False,
+                "error": str(exc),
+            }
+            state.update(self._get_error_classification_metadata(exc))
+            sku = record.get("sku")
+            if sku not in (None, ""):
+                state["id"] = str(sku).strip()
+            self.update_state(state, record=record)
+            return
+        super().process_record(normalized, context)
 
     def process_batch_record(self, record: dict, index: int) -> dict:
         """Return an already-normalized batch record."""
@@ -223,4 +238,27 @@ class ProductVariantsSink(FaireBatchSink):
                         InvalidPayloadError(item["error"])
                     ))
             state_updates.append(state)
-        return {"state_updates": state_updates}
+        return {"state_updates": state_updates, "items": result.get("items", [])}
+
+    def process_batch(self, context: dict) -> None:
+        """Process a batch and write per-record state, including superseded rows."""
+        if not self.latest_state:
+            self.init_state()
+
+        raw_records = context["records"]
+        records = [
+            self.process_batch_record(record, index)
+            for index, record in enumerate(raw_records)
+        ]
+        result = self.make_batch_request(records)
+        batch_result = self.handle_batch_response(result)
+
+        for item, state in zip(
+            batch_result.get("items", []),
+            batch_result.get("state_updates", []),
+        ):
+            self.update_state(
+                state,
+                is_duplicate=item.get("superseded", False) and item["success"],
+                record=item.get("record"),
+            )

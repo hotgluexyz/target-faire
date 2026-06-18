@@ -25,10 +25,20 @@ def normalize_inventory_record(record: dict) -> dict:
     on_hand = record.get("on_hand_quantity")
     available = record.get("available_quantity")
     if on_hand not in (None, ""):
-        quantity = int(on_hand)
+        try:
+            quantity = int(on_hand)
+        except (TypeError, ValueError) as exc:
+            raise InvalidPayloadError(
+                f"Invalid on_hand_quantity for sku {sku}: {on_hand!r}"
+            ) from exc
         mode = QUANTITY_MODE_ON_HAND
     elif available not in (None, ""):
-        quantity = int(available)
+        try:
+            quantity = int(available)
+        except (TypeError, ValueError) as exc:
+            raise InvalidPayloadError(
+                f"Invalid available_quantity for sku {sku}: {available!r}"
+            ) from exc
         mode = QUANTITY_MODE_AVAILABLE
     else:
         raise InvalidPayloadError(
@@ -81,18 +91,18 @@ def patch_inventories(
     sink: FaireBatchSink,
     inventories: List[dict],
 ) -> requests.Response:
-    """PATCH inventory levels, returning 404 responses for peel-and-retry."""
+    """PATCH inventory levels, returning 400/404 responses for batch error handling."""
     return sink.faire_request(
         "PATCH",
         INVENTORY_BY_SKUS_ENDPOINT,
         request_data={"inventories": inventories},
-        allowed_statuses=(404,),
+        allowed_statuses=(400, 404),
     )
 
 
 def peel_sku_from_error(response: requests.Response, skus: List[str]) -> Optional[str]:
-    """Return the SKU named in a Faire 404 inventory error, if present."""
-    if response.status_code != 404:
+    """Return a SKU named in a Faire 400/404 inventory error, if present."""
+    if response.status_code not in (400, 404):
         return None
     try:
         message = response.json().get("message", "")
@@ -100,6 +110,9 @@ def peel_sku_from_error(response: requests.Response, skus: List[str]) -> Optiona
         return None
     if message in skus:
         return message
+    for sku in skus:
+        if sku in message:
+            return sku
     return None
 
 
@@ -129,11 +142,19 @@ def patch_inventories_with_retry(
     return None, failed_by_sku
 
 
-def _result_item(record: dict, *, success: bool, error: Optional[str] = None) -> dict:
-    """Build a single per-SKU sync result entry."""
+def _result_item(
+    record: dict,
+    *,
+    success: bool,
+    error: Optional[str] = None,
+    superseded: bool = False,
+) -> dict:
+    """Build a single per-record sync result entry."""
     item = {"record": record, "success": success}
     if error:
         item["error"] = error
+    if superseded:
+        item["superseded"] = True
     return item
 
 
@@ -185,4 +206,19 @@ def sync_inventory_by_skus(sink: FaireBatchSink, records: List[dict]) -> dict:
             "inventory": inventory,
         }
 
-    return {"items": list(results.values())}
+    last_index_by_sku = {record["sku"]: index for index, record in enumerate(records)}
+    items: List[dict] = []
+    for index, record in enumerate(records):
+        sku = record["sku"]
+        sku_result = results[sku]
+        if index != last_index_by_sku[sku]:
+            items.append(_result_item(
+                record,
+                success=sku_result["success"],
+                error=sku_result.get("error"),
+                superseded=True,
+            ))
+            continue
+        items.append({**sku_result, "record": record})
+
+    return {"items": items}
