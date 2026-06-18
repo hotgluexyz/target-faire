@@ -110,15 +110,23 @@ Faire API:
 
 ### ProductVariants stream
 
-Updates on-hand inventory for an existing Faire variant by SKU via
-`PATCH /external-api/v2/product-inventory/by-skus` (`on_hand_quantity`).
+Updates inventory for existing Faire variants by SKU via
+`GET` + `PATCH /external-api/v2/product-inventory/by-skus`.
+Records are batched (up to 200 per request). Unknown SKUs are
+recorded as failures without blocking updates for valid SKUs.
 
 | Field | Required | Description |
 |---|---|---|
 | `sku` | Yes | Variant SKU to update |
-| `available_quantity` | Yes | On-hand quantity to set in Faire |
+| `on_hand_quantity` | One of* | Sets Faire on-hand quantity directly |
+| `available_quantity` | One of* | Sets Faire available quantity; the target sends `on_hand_quantity = available_quantity + committed_quantity` from Faire |
 
-Faire API: `PATCH /external-api/v2/product-inventory/by-skus`
+\* Provide `on_hand_quantity` or `available_quantity`. If both are present, `on_hand_quantity` wins.
+
+Faire API:
+
+- `GET /external-api/v2/product-inventory/by-skus`
+- `PATCH /external-api/v2/product-inventory/by-skus`
 
 ## Usage
 

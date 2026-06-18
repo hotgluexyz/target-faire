@@ -2,7 +2,8 @@
 
 from hotglue_etl_exceptions import InvalidPayloadError
 
-from target_faire.client import FaireSink
+from target_faire.client import FaireBatchSink, FaireSink
+from target_faire import inventory as inv
 from target_faire import product_mapping as pm
 
 
@@ -176,44 +177,88 @@ class ProductsSink(FaireSink):
         return product_id, True, state_updates
 
 
-class ProductVariantsSink(FaireSink):
-    """Updates on-hand inventory for an existing Faire variant by SKU.
+class ProductVariantsSink(FaireBatchSink):
+    """Updates inventory for existing Faire variants by SKU in batch.
 
-    Faire API: ``PATCH /external-api/v2/product-inventory/by-skus``
+    Faire API:
+      - GET /external-api/v2/product-inventory/by-skus
+      - PATCH /external-api/v2/product-inventory/by-skus
     """
 
     name = "ProductVariants"
+    max_size = 200
 
     def preprocess_record(self, record: dict, context: dict) -> dict:
-        sku = record.get("sku")
-        if sku in (None, ""):
-            raise InvalidPayloadError("Record is missing required field: sku")
+        """Validate and normalize a ProductVariants inventory record."""
+        return inv.normalize_inventory_record(record)
 
-        quantity = record.get("available_quantity")
-        if quantity in (None, ""):
-            raise InvalidPayloadError("Record is missing required field: available_quantity")
+    def process_record(self, record: dict, context: dict) -> None:
+        """Normalize and stage a record, writing state immediately on validation errors."""
+        try:
+            normalized = self.preprocess_record(record, context)
+        except InvalidPayloadError as exc:
+            if not self.latest_state:
+                self.init_state()
+            state = {
+                "success": False,
+                "error": str(exc),
+            }
+            state.update(self._get_error_classification_metadata(exc))
+            sku = record.get("sku")
+            if sku not in (None, ""):
+                state["id"] = str(sku).strip()
+            self.update_state(state, record=record)
+            return
+        super().process_record(normalized, context)
 
-        return {
-            "sku": str(sku).strip(),
-            "available_quantity": int(quantity),
-        }
+    def process_batch_record(self, record: dict, index: int) -> dict:
+        """Return an already-normalized batch record."""
+        if record.get("mode") and "quantity" in record:
+            return record
+        return inv.normalize_inventory_record(record)
 
-    def upsert_record(self, record: dict, context: dict):
-        sku = record["sku"]
-        available_quantity = record["available_quantity"]
-        self.request_api(
-            "PATCH",
-            endpoint="product-inventory/by-skus",
-            request_data={
-                "inventories": [{
-                    "sku": sku,
-                    "on_hand_quantity": available_quantity,
-                }],
-            },
-        )
-        self.logger.info(
-            "Updated inventory for sku %s to %s",
-            sku,
-            available_quantity,
-        )
-        return sku, True, {}
+    def make_batch_request(self, records: list) -> dict:
+        """Fetch current inventory and PATCH updates for a batch of SKUs."""
+        return inv.sync_inventory_by_skus(self, records)
+
+    def handle_batch_response(self, result: dict) -> dict:
+        """Convert batch sync results into per-record hotglue state updates."""
+        state_updates = []
+        for item in result.get("items", []):
+            record = item["record"]
+            state = {
+                "hash": self.build_record_hash(record),
+                "id": record["sku"],
+                "success": item["success"],
+            }
+            if not item["success"]:
+                state["error"] = item["error"]
+                if "not found" in item["error"].lower():
+                    state.update(self._get_error_classification_metadata(
+                        InvalidPayloadError(item["error"])
+                    ))
+            state_updates.append(state)
+        return {"state_updates": state_updates, "items": result.get("items", [])}
+
+    def process_batch(self, context: dict) -> None:
+        """Process a batch and write per-record state, including superseded rows."""
+        if not self.latest_state:
+            self.init_state()
+
+        raw_records = context["records"]
+        records = [
+            self.process_batch_record(record, index)
+            for index, record in enumerate(raw_records)
+        ]
+        result = self.make_batch_request(records)
+        batch_result = self.handle_batch_response(result)
+
+        for item, state in zip(
+            batch_result.get("items", []),
+            batch_result.get("state_updates", []),
+        ):
+            self.update_state(
+                state,
+                is_duplicate=item.get("superseded", False) and item["success"],
+                record=item.get("record"),
+            )
