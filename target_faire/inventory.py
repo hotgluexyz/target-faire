@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from typing import TYPE_CHECKING, Dict, List, Optional, Tuple
 
 import requests
@@ -101,18 +102,22 @@ def patch_inventories(
 
 
 def peel_sku_from_error(response: requests.Response, skus: List[str]) -> Optional[str]:
-    """Return a SKU named in a Faire 400/404 inventory error, if present."""
+    """Return a SKU named in a Faire 400/404 inventory error, if unambiguous."""
     if response.status_code not in (400, 404):
         return None
     try:
         message = response.json().get("message", "")
     except Exception:
         return None
-    if message in skus:
+
+    sku_set = set(skus)
+    if message in sku_set:
         return message
-    for sku in skus:
-        if sku in message:
-            return sku
+
+    bracket_match = re.search(r"\[([^\]]+)\]", message)
+    if bracket_match and bracket_match.group(1) in sku_set:
+        return bracket_match.group(1)
+
     return None
 
 
