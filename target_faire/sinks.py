@@ -224,7 +224,6 @@ class ProductVariantsSink(FaireBatchSink):
                         record=record,
                     )
                 )
-                state["id"] = record["sku"]
             elif item.get("superseded"):
                 state["superseded"] = True
             state_updates.append(state)

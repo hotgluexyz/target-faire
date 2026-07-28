@@ -8,10 +8,7 @@ from unittest.mock import MagicMock
 import pytest
 import requests
 
-from target_faire.inventory import (
-    peel_sku_from_error,
-    sync_inventory_by_skus,
-)
+from target_faire.inventory import peel_skus_from_error, sync_inventory_by_skus
 
 
 def _response(status_code: int, payload: dict) -> requests.Response:
@@ -24,14 +21,31 @@ def _response(status_code: int, payload: dict) -> requests.Response:
 @pytest.mark.parametrize(
     ("message", "skus", "expected"),
     [
-        ("BAD-SKU", ["BAD-SKU", "GOOD-SKU"], "BAD-SKU"),
-        ("Skus match multiple product variations: BAD-SKU", ["BAD-SKU"], "BAD-SKU"),
-        ("[BAD-SKU]", ["BAD-SKU"], "BAD-SKU"),
-        ("unknown", ["BAD-SKU"], None),
+        ("BAD-SKU", ["BAD-SKU", "GOOD-SKU"], ["BAD-SKU"]),
+        (
+            "Skus match multiple product variations: BAD-SKU",
+            ["BAD-SKU"],
+            ["BAD-SKU"],
+        ),
+        ("[BAD-SKU]", ["BAD-SKU"], ["BAD-SKU"]),
+        ("unknown", ["BAD-SKU"], []),
+        ("failed SKU-10", ["SKU-1", "SKU-10"], ["SKU-10"]),
+        ("failed SKU-1", ["SKU-1", "SKU-10"], ["SKU-1"]),
+        ("SKU-1 and SKU-10 failed", ["SKU-1", "SKU-10"], []),
+        (
+            "Skus match multiple product variations: BAD-SKU,OTHER-BAD",
+            ["BAD-SKU", "OTHER-BAD", "GOOD-SKU"],
+            ["BAD-SKU", "OTHER-BAD"],
+        ),
+        (
+            "Skus match multiple product variations: BAD-SKU,OTHER-BAD",
+            ["BAD-SKU", "GOOD-SKU"],
+            ["BAD-SKU"],
+        ),
     ],
 )
-def test_peel_sku_from_error(message, skus, expected):
-    result = peel_sku_from_error(_response(400, {"message": message}), skus)
+def test_peel_skus_from_error(message, skus, expected):
+    result = peel_skus_from_error(_response(400, {"message": message}), skus)
     assert result == expected
 
 

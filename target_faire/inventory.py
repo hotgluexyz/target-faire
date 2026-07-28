@@ -88,32 +88,45 @@ def patch_inventories_with_retry(
     )
 
 
-def peel_sku_from_error(response: requests.Response, skus: List[str]) -> Optional[str]:
-    """Return a SKU named in a Faire 400/404 inventory error, if unambiguous."""
+def peel_skus_from_error(response: requests.Response, skus: List[str]) -> List[str]:
+    """Return SKUs named in a Faire 400/404 inventory error."""
     if response.status_code not in (400, 404):
-        return None
+        return []
     try:
         message = response.json().get("message", "")
     except Exception:
-        return None
+        return []
 
     sku_set = set(skus)
     if message in sku_set:
-        return message
+        return [message]
 
     bracket_match = re.search(r"\[([^\]]+)\]", message)
     if bracket_match and bracket_match.group(1) in sku_set:
-        return bracket_match.group(1)
+        return [bracket_match.group(1)]
 
-    colon_match = re.search(r":\s*(\S+)\s*$", message)
-    if colon_match and colon_match.group(1) in sku_set:
-        return colon_match.group(1)
+    colon_match = re.search(r":\s*(.+)\s*$", message)
+    if colon_match:
+        suffix = colon_match.group(1).strip()
+        if suffix in sku_set:
+            return [suffix]
+        matched = [
+            part.strip()
+            for part in suffix.split(",")
+            if part.strip() in sku_set
+        ]
+        if matched:
+            return matched
 
-    for sku in skus:
-        if sku in message:
-            return sku
+    token_matches = [
+        sku
+        for sku in skus
+        if re.search(rf"(?<!\w){re.escape(sku)}(?!\w)", message)
+    ]
+    if len(token_matches) == 1:
+        return token_matches
 
-    return None
+    return []
 
 
 def _inventory_request(
@@ -165,18 +178,20 @@ def _request_inventories_with_retry(
         if response.status_code == 200:
             return response, failed_by_sku
 
-        bad_sku = peel_sku_from_error(response, remaining_skus)
+        bad_skus = peel_skus_from_error(response, remaining_skus)
         error = sink._extract_error_message(response)
-        if not bad_sku:
+        if not bad_skus:
             for sku in remaining_skus:
                 failed_by_sku[sku] = error
             return None, failed_by_sku
 
-        failed_by_sku[bad_sku] = error
+        bad_sku_set = set(bad_skus)
+        for bad_sku in bad_skus:
+            failed_by_sku[bad_sku] = error
         if http_method == "GET":
-            remaining = [sku for sku in remaining if sku != bad_sku]
+            remaining = [sku for sku in remaining if sku not in bad_sku_set]
         else:
-            remaining = [item for item in remaining if item["sku"] != bad_sku]
+            remaining = [item for item in remaining if item["sku"] not in bad_sku_set]
 
     return None, failed_by_sku
 
