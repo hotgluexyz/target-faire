@@ -1,14 +1,11 @@
 """Faire target sink base class."""
 
-import hashlib
-import json
 from typing import Any, Mapping, Optional, Sequence, Tuple, Union
 
 import requests
 from hotglue_etl_exceptions import InvalidCredentialsError, InvalidPayloadError
 from hotglue_singer_sdk.exceptions import FatalAPIError, RetriableAPIError
 from hotglue_singer_sdk.target_sdk.client import HotglueBatchSink, HotglueSink
-from hotglue_singer_sdk.target_sdk.common import HGJSONEncoder
 
 
 FAIRE_DEFAULT_API_URL = "https://www.faire.com/external-api/v2"
@@ -81,17 +78,3 @@ class FaireSink(FaireHttpMixin, HotglueSink):
 
 class FaireBatchSink(FaireHttpMixin, HotglueBatchSink):
     """Base class for batched Faire target sinks."""
-
-    def build_record_hash(self, record: dict) -> str:
-        """Return a stable hash for deduplicating processed records."""
-        return hashlib.sha256(
-            json.dumps(record, cls=HGJSONEncoder).encode()
-        ).hexdigest()
-
-    def _get_error_classification_metadata(self, error: Exception) -> dict:
-        """Map exceptions to hotglue error classification metadata."""
-        if isinstance(error, InvalidCredentialsError):
-            return {"hg_error_class": InvalidCredentialsError.__name__}
-        if isinstance(error, InvalidPayloadError):
-            return {"hg_error_class": InvalidPayloadError.__name__}
-        return {}

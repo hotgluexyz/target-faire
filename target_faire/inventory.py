@@ -76,28 +76,15 @@ def build_patch_item(record: dict, current_inventory: dict) -> dict:
     return {"sku": record["sku"], "on_hand_quantity": on_hand}
 
 
-def fetch_inventory_by_skus(sink: FaireBatchSink, skus: List[str]) -> Dict[str, dict]:
-    """GET current inventory levels for the given SKUs."""
-    if not skus:
-        return {}
-    response = sink.faire_request(
-        "GET",
-        INVENTORY_BY_SKUS_ENDPOINT,
-        params={"skus": skus},
-    )
-    return response.json().get("inventories") or {}
-
-
-def patch_inventories(
+def patch_inventories_with_retry(
     sink: FaireBatchSink,
     inventories: List[dict],
-) -> requests.Response:
-    """PATCH inventory levels, returning 400/404 responses for batch error handling."""
-    return sink.faire_request(
+) -> Tuple[Optional[requests.Response], Dict[str, str]]:
+    """PATCH inventories, peeling bad SKUs from 400/404 errors until success."""
+    return _request_inventories_with_retry(
+        sink,
         "PATCH",
-        INVENTORY_BY_SKUS_ENDPOINT,
-        request_data={"inventories": inventories},
-        allowed_statuses=(400, 404),
+        inventories=inventories,
     )
 
 
@@ -118,33 +105,95 @@ def peel_sku_from_error(response: requests.Response, skus: List[str]) -> Optiona
     if bracket_match and bracket_match.group(1) in sku_set:
         return bracket_match.group(1)
 
+    colon_match = re.search(r":\s*(\S+)\s*$", message)
+    if colon_match and colon_match.group(1) in sku_set:
+        return colon_match.group(1)
+
+    for sku in skus:
+        if sku in message:
+            return sku
+
     return None
 
 
-def patch_inventories_with_retry(
+def _inventory_request(
     sink: FaireBatchSink,
-    inventories: List[dict],
+    http_method: str,
+    *,
+    params: Optional[dict] = None,
+    request_data: Optional[dict] = None,
+) -> requests.Response:
+    """Send a GET or PATCH inventory-by-skus request, tolerating 400/404."""
+    return sink.faire_request(
+        http_method,
+        INVENTORY_BY_SKUS_ENDPOINT,
+        params=params,
+        request_data=request_data,
+        allowed_statuses=(400, 404),
+    )
+
+
+def _request_inventories_with_retry(
+    sink: FaireBatchSink,
+    http_method: str,
+    *,
+    skus: Optional[List[str]] = None,
+    inventories: Optional[List[dict]] = None,
 ) -> Tuple[Optional[requests.Response], Dict[str, str]]:
-    """PATCH inventories, peeling unknown SKUs from 404 errors until success."""
-    remaining = list(inventories)
+    """GET or PATCH inventories, peeling bad SKUs from 400/404 errors."""
+    if http_method == "GET":
+        remaining = list(skus or [])
+        payload_key = None
+    else:
+        remaining = list(inventories or [])
+        payload_key = "inventories"
+
     failed_by_sku: Dict[str, str] = {}
 
     while remaining:
-        response = patch_inventories(sink, remaining)
+        if http_method == "GET":
+            response = _inventory_request(sink, "GET", params={"skus": remaining})
+            remaining_skus = remaining
+        else:
+            response = _inventory_request(
+                sink,
+                "PATCH",
+                request_data={payload_key: remaining},
+            )
+            remaining_skus = [item["sku"] for item in remaining]
+
         if response.status_code == 200:
             return response, failed_by_sku
 
-        bad_sku = peel_sku_from_error(response, [item["sku"] for item in remaining])
+        bad_sku = peel_sku_from_error(response, remaining_skus)
+        error = sink._extract_error_message(response)
         if not bad_sku:
-            error = sink._extract_error_message(response)
-            for item in remaining:
-                failed_by_sku[item["sku"]] = error
+            for sku in remaining_skus:
+                failed_by_sku[sku] = error
             return None, failed_by_sku
 
-        failed_by_sku[bad_sku] = sink._extract_error_message(response)
-        remaining = [item for item in remaining if item["sku"] != bad_sku]
+        failed_by_sku[bad_sku] = error
+        if http_method == "GET":
+            remaining = [sku for sku in remaining if sku != bad_sku]
+        else:
+            remaining = [item for item in remaining if item["sku"] != bad_sku]
 
     return None, failed_by_sku
+
+
+def fetch_inventory_by_skus(
+    sink: FaireBatchSink,
+    skus: List[str],
+) -> Tuple[Dict[str, dict], Dict[str, str]]:
+    """GET current inventory levels for the given SKUs."""
+    if not skus:
+        return {}, {}
+
+    response, failed_by_sku = _request_inventories_with_retry(sink, "GET", skus=skus)
+    if response is None:
+        return {}, failed_by_sku
+
+    return response.json().get("inventories") or {}, failed_by_sku
 
 
 def _result_item(
@@ -170,11 +219,18 @@ def sync_inventory_by_skus(sink: FaireBatchSink, records: List[dict]) -> dict:
         return {"items": []}
 
     by_sku = {record["sku"]: record for record in deduped}
-    current = fetch_inventory_by_skus(sink, list(by_sku))
+    current, get_failures = fetch_inventory_by_skus(sink, list(by_sku))
     results: Dict[str, dict] = {}
     patch_items: List[dict] = []
 
     for sku, record in by_sku.items():
+        if sku in get_failures:
+            results[sku] = _result_item(
+                record,
+                success=False,
+                error=get_failures[sku],
+            )
+            continue
         if sku not in current:
             results[sku] = _result_item(
                 record,
